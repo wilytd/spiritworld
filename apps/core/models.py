@@ -2,10 +2,12 @@
 Database models for Aegis Mesh Core
 """
 
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Enum
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Enum, ForeignKey, JSON
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from database import Base
 import enum
+
 
 class TaskPriority(str, enum.Enum):
     LOW = "low"
@@ -13,11 +15,19 @@ class TaskPriority(str, enum.Enum):
     HIGH = "high"
     CRITICAL = "critical"
 
+
 class TaskStatus(str, enum.Enum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     SNOOZED = "snoozed"
+
+
+class NotificationChannel(str, enum.Enum):
+    MESH = "mesh"
+    EMAIL = "email"
+    WEBHOOK = "webhook"
+
 
 class MaintenanceTask(Base):
     __tablename__ = "maintenance_tasks"
@@ -34,6 +44,20 @@ class MaintenanceTask(Base):
     updated_at = Column(DateTime, onupdate=func.now())
     completed_at = Column(DateTime)
 
+    # Recurring task fields
+    recurrence_rule = Column(String(100))  # Cron expression: "0 9 * * 1"
+    recurrence_parent_id = Column(Integer, ForeignKey("maintenance_tasks.id"))
+
+    # Snooze with duration
+    snooze_until = Column(DateTime)
+
+    # Notification tracking
+    last_notification = Column(DateTime)
+    notification_count = Column(Integer, default=0)
+
+    # Relationships
+    recurrence_parent = relationship("MaintenanceTask", remote_side=[id], backref="recurring_instances")
+
 class AlertLog(Base):
     __tablename__ = "alert_logs"
 
@@ -43,3 +67,18 @@ class AlertLog(Base):
     sent_at = Column(DateTime, server_default=func.now())
     success = Column(Boolean, default=True)
     error_message = Column(String(500))
+
+
+class NotificationPreference(Base):
+    __tablename__ = "notification_preferences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    channel = Column(Enum(NotificationChannel), nullable=False)
+    enabled = Column(Boolean, default=True)
+    config = Column(JSON)  # {"email": "user@example.com"} or {"webhook_url": "...", "format": "slack"}
+    min_priority = Column(Enum(TaskPriority), default=TaskPriority.LOW)  # Only notify for this priority or higher
+    categories = Column(JSON)  # Filter by category, null = all categories
+    quiet_hours_start = Column(String(5))  # "22:00"
+    quiet_hours_end = Column(String(5))  # "08:00"
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())

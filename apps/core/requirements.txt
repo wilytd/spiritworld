@@ -6,3 +6,6 @@ psycopg2-binary==2.9.9
 pydantic==2.5.3
 python-dotenv==1.0.0
 httpx==0.26.0
+apscheduler==3.10.4
+aiosmtplib==3.0.1
+croniter==2.0.1
