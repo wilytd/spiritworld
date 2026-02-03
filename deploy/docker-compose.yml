@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  # Core API & Orchestration Service
+  aegis-core:
+    build: ../apps/core
+    container_name: aegis-core
+    restart: unless-stopped
+    volumes:
+      - ../apps/core:/app
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://aegis:aegis_secure_password@db:5432/aegis
+      - MESH_BRIDGE_URL=http://mesh-bridge:8001
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - aegis-network
+
+  # Meshtastic/LoRa Bridge Service
+  mesh-bridge:
+    build: ../apps/mesh-bridge
+    container_name: aegis-mesh-bridge
+    restart: unless-stopped
+    volumes:
+      - ../apps/mesh-bridge:/app
+    environment:
+      - MESH_DEVICE_PATH=/dev/ttyUSB0
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0
+    ports:
+      - "8001:8001"
+    networks:
+      - aegis-network
+
+  # Network Controller Service (Phase 2)
+  network-controller:
+    build: ../apps/network-controller
+    container_name: aegis-network-controller
+    restart: unless-stopped
+    volumes:
+      - ../apps/network-controller:/app
+    environment:
+      - OPNSENSE_URL=${OPNSENSE_URL:-}
+      - OPNSENSE_KEY=${OPNSENSE_KEY:-}
+      - OPNSENSE_SECRET=${OPNSENSE_SECRET:-}
+      - PIHOLE_URL=${PIHOLE_URL:-}
+      - PIHOLE_TOKEN=${PIHOLE_TOKEN:-}
+    ports:
+      - "8002:8002"
+    networks:
+      - aegis-network
+
+  # Maintenance Dashboard (Frontend)
+  dashboard:
+    build: ../apps/maintenance-ui
+    container_name: aegis-dashboard
+    restart: unless-stopped
+    volumes:
+      - ../apps/maintenance-ui:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - aegis-core
+    networks:
+      - aegis-network
+
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: aegis-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=aegis
+      - POSTGRES_PASSWORD=aegis_secure_password
+      - POSTGRES_DB=aegis
+    volumes:
+      - aegis-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aegis"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aegis-network
+
+networks:
+  aegis-network:
+    driver: bridge
+
+volumes:
+  aegis-db-data:
