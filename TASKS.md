@@ -1,6 +1,6 @@
 # Aegis Mesh Development Phases
 
-## Phase 1: Foundation (Current) - COMPLETED
+## Phase 1: Foundation - COMPLETED
 
 - [x] Create repository structure per PRD
   - [x] `/apps/core` - FastAPI orchestrator service
@@ -27,20 +27,31 @@
   - [x] API documentation
   - [x] Architecture overview
 
-## Phase 2: Network Integration (Planned)
+## Phase 2: Network Integration - COMPLETED
 
-- [ ] OPNsense API integration
-  - [ ] Bandwidth monitoring
-  - [ ] Firewall rule management
-- [ ] Unifi Controller integration
-  - [ ] Client listing
-  - [ ] Network statistics
-- [ ] Pi-hole/AdGuard integration
-  - [ ] Query statistics
-  - [ ] Domain blocking/allowing
-- [ ] WireGuard management
-  - [ ] Peer listing
-  - [ ] Key rotation automation
+- [x] OPNsense API integration
+  - [x] Bandwidth monitoring
+  - [x] Interface statistics
+  - [x] ARP table for client discovery
+- [x] Unifi Controller integration
+  - [x] Client listing
+  - [x] Network health statistics
+  - [x] Device/network info
+- [x] Pi-hole integration
+  - [x] Query statistics
+  - [x] Domain blocking/allowing
+  - [x] Top queries/blocked domains
+- [x] AdGuard Home integration
+  - [x] Query statistics
+  - [x] User rules for blocking/allowing
+- [x] WireGuard management (via OPNsense)
+  - [x] Peer listing and status
+  - [x] Peer creation/deletion
+  - [x] Configuration retrieval
+- [x] Graceful degradation pattern
+  - [x] Provider fallback (OPNsense -> Unifi, Pi-hole -> AdGuard)
+  - [x] Empty responses when no provider available
+  - [x] Health endpoint with per-client status
 
 ## Phase 3: Scheduler & Notifications (Planned)
 
@@ -85,3 +96,15 @@
 - [ ] Plugin system
   - [ ] Custom integration framework
   - [ ] Community contributions
+
+---
+
+## Task Status Legend
+- [ ] Not Started
+- [x] Completed
+- [~] In Progress
+- [!] Blocked
+
+---
+
+*Last Updated: 2026-02-03*

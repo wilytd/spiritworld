@@ -44,11 +44,24 @@ services:
     volumes:
       - ../apps/network-controller:/app
     environment:
+      # OPNsense
       - OPNSENSE_URL=${OPNSENSE_URL:-}
       - OPNSENSE_KEY=${OPNSENSE_KEY:-}
       - OPNSENSE_SECRET=${OPNSENSE_SECRET:-}
+      - OPNSENSE_VERIFY_SSL=${OPNSENSE_VERIFY_SSL:-false}
+      # Unifi
+      - UNIFI_URL=${UNIFI_URL:-}
+      - UNIFI_USER=${UNIFI_USER:-}
+      - UNIFI_PASS=${UNIFI_PASS:-}
+      - UNIFI_SITE=${UNIFI_SITE:-default}
+      - UNIFI_VERIFY_SSL=${UNIFI_VERIFY_SSL:-false}
+      # Pi-hole
       - PIHOLE_URL=${PIHOLE_URL:-}
       - PIHOLE_TOKEN=${PIHOLE_TOKEN:-}
+      # AdGuard
+      - ADGUARD_URL=${ADGUARD_URL:-}
+      - ADGUARD_USER=${ADGUARD_USER:-}
+      - ADGUARD_PASS=${ADGUARD_PASS:-}
     ports:
       - "8002:8002"
     networks:
