@@ -11,6 +11,35 @@ services:
       - "8000:8000"
     depends_on:
       - db
+      - mesh-bridge
+
+  # Mesh Bridge Service (Phase 4)
+  mesh-bridge:
+    build: ./apps/mesh-bridge
+    volumes:
+      - ./apps/mesh-bridge:/app
+      - mesh-data:/var/lib/aegis
+    environment:
+      # Meshtastic configuration
+      - MESH_DEVICE_PATH=/dev/ttyUSB0
+      - MESH_RECONNECT_DELAY=5.0
+      - MESH_MAX_RECONNECT_ATTEMPTS=10
+      # NomadNet configuration
+      - NOMADNET_STORAGE_PATH=/var/lib/aegis/nomadnet
+      - NOMADNET_ENABLE_PROPAGATION=true
+      # Alert configuration
+      - ALERT_ESCALATION_TIMEOUT=300.0
+      - ISP_CHECK_INTERVAL=60.0
+      - ISP_CHECK_HOSTS=8.8.8.8,1.1.1.1
+      # Queue configuration
+      - QUEUE_PERSISTENCE_PATH=/var/lib/aegis/queue
+      - QUEUE_MAX_SIZE=1000
+    ports:
+      - "8001:8000"
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0  # Meshtastic device
+    privileged: true  # Required for serial device access
+    restart: unless-stopped
 
   # Maintenance & Tasks Database
   db:
@@ -19,6 +48,8 @@ services:
       - POSTGRES_USER=user
       - POSTGRES_PASSWORD=pass
       - POSTGRES_DB=aegis
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
 
   # Maintenance Frontend
   dashboard:
@@ -28,3 +59,7 @@ services:
       - ./apps/dashboard:/app
     ports:
       - "3000:3000"
+
+volumes:
+  postgres-data:
+  mesh-data:
