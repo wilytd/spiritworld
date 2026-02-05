@@ -12,6 +12,20 @@ services:
       - DATABASE_URL=postgresql+asyncpg://aegis:aegis_secure_password@db:5432/aegis
       - MESH_BRIDGE_URL=http://mesh-bridge:8001
       - WEBHOOK_URL=${WEBHOOK_URL:-}
+      # SMTP Configuration
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM_ADDRESS=${SMTP_FROM_ADDRESS:-}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+      # Webhook Configuration
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      # Scheduler Configuration
+      - SCHEDULER_DUE_WARNING_HOURS=${SCHEDULER_DUE_WARNING_HOURS:-24}
+      - SCHEDULER_OVERDUE_CHECK_INTERVAL=${SCHEDULER_OVERDUE_CHECK_INTERVAL:-3600}
+      - SCHEDULER_SNOOZE_CHECK_INTERVAL=${SCHEDULER_SNOOZE_CHECK_INTERVAL:-300}
     ports:
       - "8000:8000"
     depends_on:
