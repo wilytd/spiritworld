@@ -1,0 +1,86 @@
+"""
+Example plugin template for Aegis Mesh
+
+To create a plugin:
+1. Copy this file and rename it (remove .template)
+2. Implement the required methods
+3. Place in the plugins directory or install via pip with entry point
+
+Entry point setup (in setup.py or pyproject.toml):
+    entry_points={
+        "aegis.plugins": [
+            "myplugin = myplugin:Plugin",
+        ],
+    }
+"""
+
+from plugins.base import PluginBase, PluginInfo, PluginCapabilities, PluginContext
+
+
+class Plugin(PluginBase):
+    """Example plugin implementation"""
+
+    @property
+    def info(self) -> PluginInfo:
+        return PluginInfo(
+            name="example-plugin",
+            version="1.0.0",
+            description="An example plugin demonstrating the plugin API",
+            author="Your Name",
+            homepage="https://github.com/yourusername/aegis-example-plugin",
+        )
+
+    @property
+    def is_configured(self) -> bool:
+        # Return True if all required configuration is present
+        # Example: check for API keys, required settings, etc.
+        return True
+
+    async def initialize(self, context: PluginContext) -> bool:
+        """
+        Called when the plugin is loaded.
+        Use context.config for plugin-specific configuration.
+        Use context.logger for logging.
+        Use context.emit_event to emit events.
+        Use context.get_db_session to get database sessions.
+        """
+        self._context = context
+        context.logger.info(f"Initializing {self.info.name}")
+
+        # Example: read config
+        # api_key = context.config.get("api_key")
+
+        return True
+
+    async def start(self) -> None:
+        """Called when the plugin should start operating"""
+        self._context.logger.info(f"Starting {self.info.name}")
+
+    async def stop(self) -> None:
+        """Called when the plugin should stop and cleanup"""
+        self._context.logger.info(f"Stopping {self.info.name}")
+
+    def get_capabilities(self) -> PluginCapabilities:
+        """
+        Return plugin capabilities.
+        Can include:
+        - routers: FastAPI routers to mount at /api/plugins/{name}/
+        - scheduled_jobs: APScheduler job definitions
+        - event_hooks: Event handlers for plugin communication
+        """
+        from plugins.registry import EventType
+
+        return PluginCapabilities(
+            routers=[],  # Add FastAPI routers here
+            scheduled_jobs=[],  # Add APScheduler jobs here
+            event_hooks={
+                # Example: subscribe to task completion events
+                # EventType.TASK_COMPLETED.value: [self._on_task_completed],
+            },
+        )
+
+    # Example event handler
+    async def _on_task_completed(self, data: dict) -> None:
+        """Handle task completion events"""
+        task_id = data.get("task_id")
+        self._context.logger.info(f"Task {task_id} completed")

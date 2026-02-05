@@ -4,7 +4,7 @@ Configuration settings for Aegis Mesh Core
 
 import os
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, List
 
 
 @dataclass
@@ -72,11 +72,35 @@ class SchedulerConfig:
 
 
 @dataclass
+class PluginSystemConfig:
+    """Plugin system configuration"""
+    enabled: bool = True
+    plugins_dir: str = "./plugins"
+    auto_discover: bool = True
+    enabled_list: List[str] = field(default_factory=list)
+    disabled_list: List[str] = field(default_factory=list)
+
+    @classmethod
+    def from_env(cls) -> "PluginSystemConfig":
+        enabled_str = os.getenv("PLUGINS_ENABLED_LIST", "")
+        disabled_str = os.getenv("PLUGINS_DISABLED_LIST", "")
+
+        return cls(
+            enabled=os.getenv("PLUGINS_ENABLED", "true").lower() == "true",
+            plugins_dir=os.getenv("PLUGINS_DIR", "./plugins"),
+            auto_discover=os.getenv("PLUGINS_AUTO_DISCOVER", "true").lower() == "true",
+            enabled_list=[p.strip() for p in enabled_str.split(",") if p.strip()],
+            disabled_list=[p.strip() for p in disabled_str.split(",") if p.strip()],
+        )
+
+
+@dataclass
 class AppConfig:
     """Main application configuration"""
     smtp: SMTPConfig = field(default_factory=SMTPConfig)
     webhook: WebhookConfig = field(default_factory=WebhookConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
+    plugins: PluginSystemConfig = field(default_factory=PluginSystemConfig)
     mesh_bridge_url: str = "http://mesh-bridge:8001"
 
     @classmethod
@@ -85,6 +109,7 @@ class AppConfig:
             smtp=SMTPConfig.from_env(),
             webhook=WebhookConfig.from_env(),
             scheduler=SchedulerConfig.from_env(),
+            plugins=PluginSystemConfig.from_env(),
             mesh_bridge_url=os.getenv("MESH_BRIDGE_URL", "http://mesh-bridge:8001"),
         )
 

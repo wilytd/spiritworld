@@ -123,3 +123,32 @@ class NotificationPreferenceResponse(BaseModel):
 
 class TestNotificationRequest(BaseModel):
     message: str = "Test notification from Aegis Mesh"
+
+
+# LLM Analysis schemas
+class LLMAnalysisLogResponse(BaseModel):
+    id: int
+    task_id: Optional[int]
+    analysis_type: str
+    provider_used: str
+    model_used: str
+    response_json: Optional[dict]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Plugin schemas
+class PluginStateResponse(BaseModel):
+    id: int
+    plugin_name: str
+    enabled: bool
+    config_json: Optional[dict]
+    state_json: Optional[dict]
+    last_error: Optional[str]
+    created_at: datetime
+    updated_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
