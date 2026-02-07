@@ -2,6 +2,7 @@
 Plugin manager for lifecycle management
 """
 
+import asyncio
 import logging
 from typing import Dict, List, Optional, Any, Callable, Type
 
@@ -41,6 +42,9 @@ class PluginManager:
         self._discovered: Dict[str, Type[PluginBase]] = {}
         self._instances: Dict[str, PluginBase] = {}
         self._configs: Dict[str, Dict[str, Any]] = {}
+
+        # Lock for thread-safe plugin enable/disable operations
+        self._lock = asyncio.Lock()
 
     async def discover(self) -> List[str]:
         """
@@ -196,76 +200,84 @@ class PluginManager:
             event_registry.unregister(name)
 
     async def enable_plugin(self, name: str) -> bool:
-        """Enable a disabled plugin"""
-        if name in self._instances:
-            return True  # Already loaded
+        """
+        Enable a disabled plugin.
+        Thread-safe: uses lock to prevent concurrent modifications.
+        """
+        async with self._lock:
+            if name in self._instances:
+                return True  # Already loaded
 
-        if name not in self._discovered:
-            logger.warning(f"Plugin not discovered: {name}")
-            return False
-
-        # Remove from disabled list if present
-        if name in self.disabled_list:
-            self.disabled_list.remove(name)
-
-        # Load and start the plugin
-        plugin_class = self._discovered[name]
-
-        try:
-            instance = plugin_class()
-            context = PluginContext(
-                config=self._configs.get(name, {}),
-                get_db_session=self.get_db_session or (lambda: None),
-                emit_event=self._create_emit_function(name),
-                logger=logging.getLogger(f"aegis.plugins.{name}")
-            )
-
-            success = await instance.initialize(context)
-            if not success:
+            if name not in self._discovered:
+                logger.warning(f"Plugin not discovered: {name}")
                 return False
 
-            instance._initialized = True
-            instance._context = context
-            self._instances[name] = instance
+            # Remove from disabled list if present
+            if name in self.disabled_list:
+                self.disabled_list.remove(name)
 
-            capabilities = instance.get_capabilities()
-            self._register_hooks(name, capabilities)
+            # Load and start the plugin
+            plugin_class = self._discovered[name]
 
-            await instance.start()
-            instance._running = True
+            try:
+                instance = plugin_class()
+                context = PluginContext(
+                    config=self._configs.get(name, {}),
+                    get_db_session=self.get_db_session or (lambda: None),
+                    emit_event=self._create_emit_function(name),
+                    logger=logging.getLogger(f"aegis.plugins.{name}")
+                )
 
-            await event_registry.emit(EventType.PLUGIN_LOADED, {"name": name})
-            logger.info(f"Enabled plugin: {name}")
-            return True
+                success = await instance.initialize(context)
+                if not success:
+                    return False
 
-        except Exception as e:
-            logger.error(f"Failed to enable plugin {name}: {e}")
-            return False
+                instance._initialized = True
+                instance._context = context
+                self._instances[name] = instance
+
+                capabilities = instance.get_capabilities()
+                self._register_hooks(name, capabilities)
+
+                await instance.start()
+                instance._running = True
+
+                await event_registry.emit(EventType.PLUGIN_LOADED, {"name": name})
+                logger.info(f"Enabled plugin: {name}")
+                return True
+
+            except Exception as e:
+                logger.error(f"Failed to enable plugin {name}: {e}")
+                return False
 
     async def disable_plugin(self, name: str) -> bool:
-        """Disable an enabled plugin"""
-        if name not in self._instances:
-            return True  # Already not loaded
+        """
+        Disable an enabled plugin.
+        Thread-safe: uses lock to prevent concurrent modifications.
+        """
+        async with self._lock:
+            if name not in self._instances:
+                return True  # Already not loaded
 
-        try:
-            instance = self._instances[name]
-            await instance.stop()
-            instance._running = False
+            try:
+                instance = self._instances[name]
+                await instance.stop()
+                instance._running = False
 
-            event_registry.unregister(name)
-            del self._instances[name]
+                event_registry.unregister(name)
+                del self._instances[name]
 
-            # Add to disabled list
-            if name not in self.disabled_list:
-                self.disabled_list.append(name)
+                # Add to disabled list
+                if name not in self.disabled_list:
+                    self.disabled_list.append(name)
 
-            await event_registry.emit(EventType.PLUGIN_UNLOADED, {"name": name})
-            logger.info(f"Disabled plugin: {name}")
-            return True
+                await event_registry.emit(EventType.PLUGIN_UNLOADED, {"name": name})
+                logger.info(f"Disabled plugin: {name}")
+                return True
 
-        except Exception as e:
-            logger.error(f"Failed to disable plugin {name}: {e}")
-            return False
+            except Exception as e:
+                logger.error(f"Failed to disable plugin {name}: {e}")
+                return False
 
     def get_plugin(self, name: str) -> Optional[PluginBase]:
         """Get a loaded plugin instance by name"""

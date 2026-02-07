@@ -4,7 +4,9 @@ LLM Service with provider fallback orchestration
 
 import json
 import logging
-from typing import Optional, Dict, Any, List
+import time
+from dataclasses import dataclass
+from typing import Optional, Dict, Any, List, Tuple
 
 from .config import LLMConfig
 from .base import BaseLLMProvider, LLMResponse
@@ -13,6 +15,9 @@ from . import prompts
 
 logger = logging.getLogger(__name__)
 
+# Default TTL for availability cache (seconds)
+DEFAULT_AVAILABILITY_TTL = 60.0
+
 
 class LLMService:
     """
@@ -20,10 +25,12 @@ class LLMService:
     Tries providers in configured priority order.
     """
 
-    def __init__(self, config: LLMConfig):
+    def __init__(self, config: LLMConfig, availability_ttl: float = DEFAULT_AVAILABILITY_TTL):
         self.config = config
+        self.availability_ttl = availability_ttl
         self._providers: Dict[str, BaseLLMProvider] = {}
-        self._availability: Dict[str, bool] = {}
+        # Availability cache: provider_name -> (is_available, timestamp)
+        self._availability: Dict[str, Tuple[bool, float]] = {}
 
         # Initialize providers
         self._init_providers()
@@ -40,34 +47,56 @@ class LLMService:
             self._providers["anthropic"] = AnthropicProvider(self.config.anthropic)
 
     async def check_availability(self) -> Dict[str, bool]:
-        """Check availability of all providers"""
-        self._availability.clear()
+        """Check availability of all providers and update cache"""
+        now = time.time()
 
         for name, provider in self._providers.items():
             try:
                 available = await provider.is_available()
-                self._availability[name] = available
+                self._availability[name] = (available, now)
                 logger.info(f"Provider {name}: {'available' if available else 'unavailable'}")
             except Exception as e:
                 logger.error(f"Error checking {name} availability: {e}")
-                self._availability[name] = False
+                self._availability[name] = (False, now)
 
-        return dict(self._availability)
+        return {name: avail for name, (avail, _) in self._availability.items()}
+
+    def _is_availability_cached(self, provider_name: str) -> Optional[bool]:
+        """
+        Check if provider availability is cached and not expired.
+        Returns the cached value if valid, None if expired or not cached.
+        """
+        if provider_name not in self._availability:
+            return None
+
+        is_available, cached_at = self._availability[provider_name]
+        age = time.time() - cached_at
+
+        if age > self.availability_ttl:
+            # Cache expired
+            logger.debug(f"Availability cache expired for {provider_name} (age: {age:.1f}s)")
+            return None
+
+        return is_available
 
     def get_status(self) -> Dict[str, Any]:
         """Get service status"""
+        now = time.time()
         return {
             "enabled": self.config.enabled,
             "providers": {
                 name: {
                     **provider.get_status(),
-                    "available": self._availability.get(name),
+                    "available": self._availability.get(name, (None, 0))[0],
+                    "cache_age_seconds": round(now - self._availability.get(name, (None, 0))[1], 1)
+                    if name in self._availability else None,
                 }
                 for name, provider in self._providers.items()
             },
             "priority": self.config.provider_priority,
             "analysis_enabled": self.config.enable_analysis,
             "analysis_schedule": self.config.analysis_schedule,
+            "availability_ttl_seconds": self.availability_ttl,
         }
 
     async def _get_available_provider(
@@ -91,19 +120,26 @@ class LLMService:
 
             provider = self._providers[provider_name]
 
-            # Check cached availability first
-            if self._availability.get(provider_name) is False:
+            # Check cached availability (respects TTL)
+            cached_available = self._is_availability_cached(provider_name)
+
+            if cached_available is False:
+                # Cached as unavailable and not expired
                 continue
 
-            # Verify availability if not cached
-            if provider_name not in self._availability:
+            if cached_available is None:
+                # Not cached or expired - check availability
                 try:
-                    self._availability[provider_name] = await provider.is_available()
+                    is_available = await provider.is_available()
+                    self._availability[provider_name] = (is_available, time.time())
+                    if not is_available:
+                        continue
                 except Exception:
-                    self._availability[provider_name] = False
+                    self._availability[provider_name] = (False, time.time())
+                    continue
 
-            if self._availability.get(provider_name):
-                return provider
+            # Either cached as available or just verified as available
+            return provider
 
         return None
 
@@ -147,8 +183,8 @@ class LLMService:
                 return response
             except Exception as e:
                 logger.error(f"Error from {provider.name}: {e}")
-                # Mark as unavailable for future requests
-                self._availability[provider.name] = False
+                # Mark as unavailable for future requests (with timestamp for TTL)
+                self._availability[provider.name] = (False, time.time())
                 # Loop continues to try next provider
 
     async def complete_json(
@@ -204,8 +240,8 @@ class LLMService:
 
             except Exception as e:
                 logger.error(f"Error from {provider.name}: {e}")
-                # Mark as unavailable for future requests
-                self._availability[provider.name] = False
+                # Mark as unavailable for future requests (with timestamp for TTL)
+                self._availability[provider.name] = (False, time.time())
                 # Loop continues to try next provider
 
     async def analyze_task(self, task: Dict[str, Any]) -> Optional[Dict[str, Any]]:
