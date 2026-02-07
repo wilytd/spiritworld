@@ -1,74 +1,215 @@
-## Product Requirements Document (PRD): Project "Aegis Mesh"
+# Aegis Mesh
 
-### 1. Executive Summary
+A unified, self-hosted management layer for hybrid home labs that integrates network infrastructure monitoring, Meshtastic/NomadNet mesh communications, and automated maintenance task scheduling.
 
-**Project Goal:** To create a unified, self-hosted management layer for a hybrid home lab that integrates standard networking, Meshtastic/NomadNet communications, and automated infrastructure maintenance.
-**Target Outcome:** A GitHub-ready, containerized repository that allows users to deploy, monitor, and maintain a resilient local network.
+## Architecture
 
----
-
-### 2. Functional Requirements
-
-#### **A. Enhanced Network Control**
-
-* **Traffic Management:** Integration with existing gateways (e.g., OPNsense or Unifi) via API to monitor bandwidth.
-* **DNS/Ad-blocking:** Centralized control for Pi-hole or AdGuard Home.
-* **Security:** Automated VLAN tagging or WireGuard VPN management for remote access.
-
-#### **B. Meshtastic & NomadNet Integration**
-
-* **Gateway Bridge:** A service that pipes Meshtastic LoRa packets into the home lab environment.
-* **NomadNet Node:** Hosting a Nomad Network node to allow for encrypted, resilient file sharing and messaging over the mesh.
-* **Cross-Protocol Alerts:** The ability to send critical lab alerts (e.g., "Server Offline") over Meshtastic if the primary ISP goes down.
-
-#### **C. Maintenance Task Interface**
-
-* **Scheduler:** A dashboard showing recurring tasks (e.g., "Clear server dust," "Update Docker containers," "Test UPS batteries").
-* **Status Tracking:** Ability to "snooze" or "complete" tasks with a persistent log.
-* **Notification Engine:** Reminders pushed via Webhooks, Email, or the Meshtastic bridge.
-
----
-
-### 3. Technical Architecture & Extensibility
-
-To ensure this isn't a "monolith" that breaks when one part updates, we will use a **Microservices Architecture**.
-
-* **Core:** Python (FastAPI) or Go-based orchestrator.
-* **Database:** PostgreSQL or InfluxDB (for time-series network data).
-* **Frontend:** React or Next.js dashboard with a mobile-responsive design.
-* **Deployment:** Docker Compose or Kubernetes (K3s) manifests for easy "one-click" setup.
-
----
-
-### 4. Proposed Repository Structure
-
-```text
-/aegis-mesh
-├── /apps
-│   ├── /network-controller  # Integration scripts for OPNsense/Unifi
-│   ├── /mesh-bridge        # Meshtastic/NomadNet API connectors
-│   └── /maintenance-ui     # The frontend dashboard
-├── /deploy
-│   ├── docker-compose.yml
-│   └── /k8s                # Helm charts for extensibility
-├── /docs                   # Setup guides and API documentation
-└── README.md
+Aegis Mesh is built as a microservices architecture with five main components:
 
 ```
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│   Dashboard     │────▶│   Aegis Core     │────▶│   PostgreSQL    │
+│   (Next.js)     │     │   (FastAPI)      │     │                 │
+│   :3000         │     │   :8000          │     │   :5432         │
+└─────────────────┘     └────────┬─────────┘     └─────────────────┘
+                                 │
+                    ┌────────────┼────────────┐
+                    ▼            ▼            ▼
+           ┌──────────────┐ ┌──────────┐ ┌──────────┐
+           │Network Ctrl  │ │Mesh Bridge│ │ Ollama   │
+           │(FastAPI)     │ │(FastAPI)  │ │ (LLM)    │
+           │:8002         │ │:8001      │ │ :11434   │
+           └──────────────┘ └──────────┘ └──────────┘
+```
 
----
+## Services
 
-### 5. Success Metrics
+### Aegis Core (`apps/core`) - Port 8000
+The central orchestrator providing:
+- **Task Management**: CRUD operations for maintenance tasks with priority levels, categories, and due dates
+- **Scheduler**: Background jobs for due date notifications, snooze handling, and recurring task generation
+- **Notifications**: Multi-channel alerts via email (SMTP), webhooks (Slack/Discord), and mesh bridge
+- **Plugin System**: Extensible architecture with lifecycle management and event hooks
+- **LLM Integration**: Multi-provider support (Ollama, OpenAI, Anthropic) for task analysis
 
-* **Interoperability:** Successful message delivery from the Home Lab to a Meshtastic handheld device.
-* **Reliability:** Maintenance reminders persist through system reboots.
-* **Latency:** Network control dashboard updates within <2 seconds of state change.
+### Network Controller (`apps/network-controller`) - Port 8002
+Integrates with home network infrastructure:
+- **OPNsense**: Firewall rules, traffic statistics, interface monitoring
+- **Unifi**: Controller API for device management and statistics
+- **Pi-hole**: DNS blocking statistics and query logs
+- **AdGuard Home**: Filtering statistics and DNS management
 
----
+### Mesh Bridge (`apps/mesh-bridge`) - Port 8001
+LoRa mesh network integration:
+- **Meshtastic**: Send/receive messages via LoRa radio, node discovery
+- **NomadNet**: LXMF message routing and page serving
+- **Message Queue**: Persistent queue with retry logic for mesh delivery
+- **Alert Routing**: Route critical alerts over mesh when primary network is down
 
-### 6. Future Extensibility (Roadmap)
+### Dashboard (`apps/maintenance-ui`) - Port 3000
+Next.js frontend providing:
+- Task list with filtering by status and category
+- Task creation/editing forms
+- Snooze dialog with preset durations
+- Notification preferences configuration
 
-* **AI Integration:** Local LLM to analyze network logs and suggest maintenance.
-* **Solar Monitoring:** If the home lab runs on backup power, integrate Victron/Solar data into the dashboard.
+## Quick Start
 
----
+### Prerequisites
+- Docker and Docker Compose
+- (Optional) Meshtastic device at `/dev/ttyUSB0`
+
+### Running
+
+```bash
+cd deploy
+
+# Copy and configure environment
+cp .env.example .env
+# Edit .env with your settings
+
+# Start core services
+docker compose up -d
+
+# Include local LLM (Ollama)
+docker compose --profile llm up -d
+```
+
+### Accessing Services
+- Dashboard: http://localhost:3000
+- Core API: http://localhost:8000
+- API Docs: http://localhost:8000/docs
+- Network Controller: http://localhost:8002
+- Mesh Bridge: http://localhost:8001
+
+## API Endpoints
+
+### Tasks (`/api/tasks`)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/` | List tasks (filterable by status, category) |
+| POST | `/` | Create task |
+| GET | `/{id}` | Get task by ID |
+| PATCH | `/{id}` | Update task |
+| DELETE | `/{id}` | Delete task |
+| POST | `/{id}/snooze` | Snooze task |
+| POST | `/{id}/complete` | Mark task complete |
+| POST | `/recurring` | Create recurring task (cron-based) |
+
+### Notifications (`/api/notifications`)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/preferences` | List notification preferences |
+| POST | `/preferences` | Create preference |
+| PATCH | `/preferences/{id}` | Update preference |
+| POST | `/test/{id}` | Send test notification |
+
+### LLM (`/api/llm`)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/status` | Provider status and availability |
+| POST | `/providers/check` | Refresh provider availability |
+| POST | `/analyze/task` | Analyze single task |
+| POST | `/analyze/batch` | Batch analyze pending tasks |
+| POST | `/complete` | Raw LLM completion |
+
+### Plugins (`/api/plugins`)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/` | List discovered/loaded plugins |
+| GET | `/{name}` | Get plugin details |
+| POST | `/{name}/enable` | Enable plugin |
+| POST | `/{name}/disable` | Disable plugin |
+
+### Alerts (`/api/alerts`)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/send` | Send alert via mesh/webhook |
+| GET | `/history` | List recent alerts |
+
+## Configuration
+
+Configuration is done via environment variables. See `deploy/.env.example` for all options.
+
+### Key Variables
+
+```bash
+# Database
+DATABASE_URL=postgresql+asyncpg://aegis:password@db:5432/aegis
+
+# Notifications
+SMTP_HOST=smtp.example.com
+SLACK_WEBHOOK_URL=https://hooks.slack.com/...
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+
+# Network Integrations
+OPNSENSE_URL=https://192.168.1.1
+OPNSENSE_KEY=your_api_key
+OPNSENSE_SECRET=your_api_secret
+
+UNIFI_URL=https://192.168.1.1:8443
+UNIFI_USER=admin
+UNIFI_PASS=password
+
+PIHOLE_URL=http://192.168.1.10
+PIHOLE_TOKEN=your_token
+
+# LLM Providers (in priority order)
+LLM_PROVIDER_PRIORITY=ollama,openai,anthropic
+OLLAMA_URL=http://ollama:11434
+OLLAMA_MODEL=llama3.2
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Meshtastic
+MESH_DEVICE_PATH=/dev/ttyUSB0
+```
+
+## Plugin Development
+
+Plugins extend Aegis Mesh functionality. Create a Python file in `apps/core/plugins/`:
+
+```python
+from plugins.base import PluginBase, PluginInfo, PluginContext
+
+class Plugin(PluginBase):
+    @property
+    def info(self) -> PluginInfo:
+        return PluginInfo(
+            name="my-plugin",
+            version="1.0.0",
+            description="My custom plugin"
+        )
+
+    @property
+    def is_configured(self) -> bool:
+        return True
+
+    async def initialize(self, context: PluginContext) -> bool:
+        self._context = context
+        return True
+
+    async def start(self) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+```
+
+Plugins can provide:
+- FastAPI routers (mounted at `/api/plugins/{name}/`)
+- Scheduled jobs (APScheduler)
+- Event hooks (subscribe to task.created, task.completed, etc.)
+
+## Tech Stack
+
+- **Backend**: Python 3.11+, FastAPI, SQLAlchemy 2.0, APScheduler
+- **Frontend**: Next.js 14, React, TypeScript, Tailwind CSS
+- **Database**: PostgreSQL 15
+- **LLM**: Ollama (local), OpenAI, Anthropic
+- **Mesh**: Meshtastic Python library, LXMF
+- **Deployment**: Docker, Docker Compose
+
+## License
+
+MIT
