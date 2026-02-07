@@ -70,10 +70,23 @@ class LLMService:
             "analysis_schedule": self.config.analysis_schedule,
         }
 
-    async def _get_available_provider(self) -> Optional[BaseLLMProvider]:
-        """Get first available provider in priority order"""
+    async def _get_available_provider(
+        self,
+        exclude: Optional[set] = None
+    ) -> Optional[BaseLLMProvider]:
+        """
+        Get first available provider in priority order.
+
+        Args:
+            exclude: Set of provider names to skip (already attempted this request)
+        """
+        exclude = exclude or set()
+
         for provider_name in self.config.provider_priority:
             if provider_name not in self._providers:
+                continue
+
+            if provider_name in exclude:
                 continue
 
             provider = self._providers[provider_name]
@@ -103,31 +116,40 @@ class LLMService:
     ) -> Optional[LLMResponse]:
         """
         Generate completion using first available provider.
+        Automatically falls back to next provider on failure.
         Returns None if no providers are available.
         """
         if not self.config.enabled:
             logger.warning("LLM service is disabled")
             return None
 
-        provider = await self._get_available_provider()
-        if not provider:
-            logger.error("No LLM providers available")
-            return None
+        attempted: set = set()
 
-        try:
-            response = await provider.complete(
-                prompt=prompt,
-                system_prompt=system_prompt,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-            logger.debug(f"Completion from {provider.name}: {len(response.content)} chars")
-            return response
-        except Exception as e:
-            logger.error(f"Error from {provider.name}: {e}")
-            # Mark as unavailable and try next
-            self._availability[provider.name] = False
-            return await self.complete(prompt, system_prompt, temperature, max_tokens)
+        while True:
+            provider = await self._get_available_provider(exclude=attempted)
+            if not provider:
+                if attempted:
+                    logger.error(f"All LLM providers failed. Attempted: {attempted}")
+                else:
+                    logger.error("No LLM providers available")
+                return None
+
+            attempted.add(provider.name)
+
+            try:
+                response = await provider.complete(
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                logger.debug(f"Completion from {provider.name}: {len(response.content)} chars")
+                return response
+            except Exception as e:
+                logger.error(f"Error from {provider.name}: {e}")
+                # Mark as unavailable for future requests
+                self._availability[provider.name] = False
+                # Loop continues to try next provider
 
     async def complete_json(
         self,
@@ -138,42 +160,53 @@ class LLMService:
     ) -> Optional[Dict[str, Any]]:
         """
         Generate JSON completion and parse result.
+        Automatically falls back to next provider on failure.
         Returns None if no providers available or parsing fails.
         """
         if not self.config.enabled:
             return None
 
-        provider = await self._get_available_provider()
-        if not provider:
-            logger.error("No LLM providers available")
-            return None
+        attempted: set = set()
 
-        try:
-            response = await provider.complete_json(
-                prompt=prompt,
-                system_prompt=system_prompt,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-
-            # Parse JSON response
-            try:
-                parsed = json.loads(response.content)
-                return {
-                    "data": parsed,
-                    "provider": response.provider,
-                    "model": response.model,
-                    "usage": response.usage,
-                }
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse JSON from {provider.name}: {e}")
-                logger.debug(f"Raw response: {response.content[:500]}")
+        while True:
+            provider = await self._get_available_provider(exclude=attempted)
+            if not provider:
+                if attempted:
+                    logger.error(f"All LLM providers failed. Attempted: {attempted}")
+                else:
+                    logger.error("No LLM providers available")
                 return None
 
-        except Exception as e:
-            logger.error(f"Error from {provider.name}: {e}")
-            self._availability[provider.name] = False
-            return await self.complete_json(prompt, system_prompt, temperature, max_tokens)
+            attempted.add(provider.name)
+
+            try:
+                response = await provider.complete_json(
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+
+                # Parse JSON response
+                try:
+                    parsed = json.loads(response.content)
+                    return {
+                        "data": parsed,
+                        "provider": response.provider,
+                        "model": response.model,
+                        "usage": response.usage,
+                    }
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse JSON from {provider.name}: {e}")
+                    logger.debug(f"Raw response: {response.content[:500]}")
+                    # Don't fallback for JSON parse errors - that's a response quality issue
+                    return None
+
+            except Exception as e:
+                logger.error(f"Error from {provider.name}: {e}")
+                # Mark as unavailable for future requests
+                self._availability[provider.name] = False
+                # Loop continues to try next provider
 
     async def analyze_task(self, task: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
