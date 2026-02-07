@@ -8,6 +8,7 @@ services:
     restart: unless-stopped
     volumes:
       - ../apps/core:/app
+      - aegis-plugins:/app/plugins
     environment:
       - DATABASE_URL=postgresql+asyncpg://aegis:aegis_secure_password@db:5432/aegis
       - MESH_BRIDGE_URL=http://mesh-bridge:8001
@@ -26,6 +27,31 @@ services:
       - SCHEDULER_DUE_WARNING_HOURS=${SCHEDULER_DUE_WARNING_HOURS:-24}
       - SCHEDULER_OVERDUE_CHECK_INTERVAL=${SCHEDULER_OVERDUE_CHECK_INTERVAL:-3600}
       - SCHEDULER_SNOOZE_CHECK_INTERVAL=${SCHEDULER_SNOOZE_CHECK_INTERVAL:-300}
+      # Plugin System Configuration
+      - PLUGINS_ENABLED=${PLUGINS_ENABLED:-true}
+      - PLUGINS_DIR=${PLUGINS_DIR:-./plugins}
+      - PLUGINS_AUTO_DISCOVER=${PLUGINS_AUTO_DISCOVER:-true}
+      - PLUGINS_ENABLED_LIST=${PLUGINS_ENABLED_LIST:-}
+      - PLUGINS_DISABLED_LIST=${PLUGINS_DISABLED_LIST:-}
+      # LLM Configuration
+      - LLM_ENABLED=${LLM_ENABLED:-true}
+      - LLM_PROVIDER_PRIORITY=${LLM_PROVIDER_PRIORITY:-ollama,openai,anthropic}
+      - LLM_ENABLE_ANALYSIS=${LLM_ENABLE_ANALYSIS:-true}
+      - LLM_ANALYSIS_SCHEDULE=${LLM_ANALYSIS_SCHEDULE:-0 6 * * *}
+      # Ollama
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      - OLLAMA_TIMEOUT=${OLLAMA_TIMEOUT:-120.0}
+      # OpenAI
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - OPENAI_TIMEOUT=${OPENAI_TIMEOUT:-60.0}
+      - OPENAI_MAX_TOKENS=${OPENAI_MAX_TOKENS:-2048}
+      # Anthropic
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}
+      - ANTHROPIC_TIMEOUT=${ANTHROPIC_TIMEOUT:-60.0}
+      - ANTHROPIC_MAX_TOKENS=${ANTHROPIC_MAX_TOKENS:-2048}
     ports:
       - "8000:8000"
     depends_on:
@@ -118,9 +144,33 @@ services:
     networks:
       - aegis-network
 
+  # Ollama Local LLM Service (optional - comment out if not using)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: aegis-ollama
+    restart: unless-stopped
+    volumes:
+      - aegis-ollama-data:/root/.ollama
+    ports:
+      - "11434:11434"
+    networks:
+      - aegis-network
+    # Uncomment below for GPU support (requires nvidia-container-toolkit)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    profiles:
+      - llm  # Only starts with: docker compose --profile llm up
+
 networks:
   aegis-network:
     driver: bridge
 
 volumes:
   aegis-db-data:
+  aegis-plugins:
+  aegis-ollama-data:

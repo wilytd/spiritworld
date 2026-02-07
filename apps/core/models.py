@@ -82,3 +82,33 @@ class NotificationPreference(Base):
     quiet_hours_end = Column(String(5))  # "08:00"
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
+
+
+class LLMAnalysisLog(Base):
+    """Log of LLM analysis operations"""
+    __tablename__ = "llm_analysis_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("maintenance_tasks.id"), nullable=True)
+    analysis_type = Column(String(50))  # "single", "batch"
+    provider_used = Column(String(50))
+    model_used = Column(String(100))
+    response_json = Column(JSON)
+    created_at = Column(DateTime, server_default=func.now())
+
+    # Relationship
+    task = relationship("MaintenanceTask", backref="llm_analyses")
+
+
+class PluginState(Base):
+    """Persistent state for plugins"""
+    __tablename__ = "plugin_states"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plugin_name = Column(String(100), unique=True, nullable=False)
+    enabled = Column(Boolean, default=True)
+    config_json = Column(JSON)  # Plugin-specific configuration
+    state_json = Column(JSON)  # Plugin runtime state
+    last_error = Column(String(500))
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
