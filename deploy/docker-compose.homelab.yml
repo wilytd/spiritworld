@@ -1,0 +1,255 @@
+# Aegis Mesh - Home Server Deployment
+#
+# Production-ready compose for testing on a home server.
+# Differences from docker-compose.yml (dev):
+#   - No source volume mounts (uses built images only)
+#   - Mesh bridge is optional (behind 'mesh' profile)
+#   - DB credentials configurable via .env
+#   - Dashboard API URL configurable for LAN access
+#   - Health checks on all services
+#   - Memory limits for modest hardware
+#   - DB port only exposed on localhost
+#
+# Usage:
+#   cp .env.homelab .env
+#   # Edit .env with your settings (at minimum set HOMELAB_IP)
+#   docker compose -f docker-compose.homelab.yml up -d
+#
+#   # With Meshtastic radio:
+#   docker compose -f docker-compose.homelab.yml --profile mesh up -d
+#
+#   # With local LLM:
+#   docker compose -f docker-compose.homelab.yml --profile llm up -d
+#
+#   # With everything:
+#   docker compose -f docker-compose.homelab.yml --profile mesh --profile llm up -d
+
+version: '3.8'
+
+services:
+  # ──────────────────────────────────────────────
+  # Core API & Orchestration
+  # ──────────────────────────────────────────────
+  aegis-core:
+    build: ../apps/core
+    container_name: aegis-core
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-aegis}:${POSTGRES_PASSWORD:-aegis_secure_password}@db:5432/${POSTGRES_DB:-aegis}
+      - MESH_BRIDGE_URL=http://mesh-bridge:8001
+      # SMTP
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM_ADDRESS=${SMTP_FROM_ADDRESS:-}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+      # Webhooks
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      # Scheduler
+      - SCHEDULER_DUE_WARNING_HOURS=${SCHEDULER_DUE_WARNING_HOURS:-24}
+      - SCHEDULER_OVERDUE_CHECK_INTERVAL=${SCHEDULER_OVERDUE_CHECK_INTERVAL:-3600}
+      - SCHEDULER_SNOOZE_CHECK_INTERVAL=${SCHEDULER_SNOOZE_CHECK_INTERVAL:-300}
+      # Plugins
+      - PLUGINS_ENABLED=${PLUGINS_ENABLED:-true}
+      - PLUGINS_DIR=${PLUGINS_DIR:-./plugins}
+      - PLUGINS_AUTO_DISCOVER=${PLUGINS_AUTO_DISCOVER:-true}
+      - PLUGINS_ENABLED_LIST=${PLUGINS_ENABLED_LIST:-}
+      - PLUGINS_DISABLED_LIST=${PLUGINS_DISABLED_LIST:-}
+      # LLM
+      - LLM_ENABLED=${LLM_ENABLED:-false}
+      - LLM_PROVIDER_PRIORITY=${LLM_PROVIDER_PRIORITY:-ollama,openai,anthropic}
+      - LLM_ENABLE_ANALYSIS=${LLM_ENABLE_ANALYSIS:-false}
+      - LLM_ANALYSIS_SCHEDULE=${LLM_ANALYSIS_SCHEDULE:-0 6 * * *}
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      - OLLAMA_TIMEOUT=${OLLAMA_TIMEOUT:-120.0}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - OPENAI_TIMEOUT=${OPENAI_TIMEOUT:-60.0}
+      - OPENAI_MAX_TOKENS=${OPENAI_MAX_TOKENS:-2048}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}
+      - ANTHROPIC_TIMEOUT=${ANTHROPIC_TIMEOUT:-60.0}
+      - ANTHROPIC_MAX_TOKENS=${ANTHROPIC_MAX_TOKENS:-2048}
+    ports:
+      - "${CORE_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/status')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    volumes:
+      - aegis-plugins:/app/plugins
+    networks:
+      - aegis-network
+
+  # ──────────────────────────────────────────────
+  # Network Controller
+  # ──────────────────────────────────────────────
+  network-controller:
+    build: ../apps/network-controller
+    container_name: aegis-network-controller
+    restart: unless-stopped
+    environment:
+      # OPNsense
+      - OPNSENSE_URL=${OPNSENSE_URL:-}
+      - OPNSENSE_KEY=${OPNSENSE_KEY:-}
+      - OPNSENSE_SECRET=${OPNSENSE_SECRET:-}
+      - OPNSENSE_VERIFY_SSL=${OPNSENSE_VERIFY_SSL:-false}
+      # Unifi
+      - UNIFI_URL=${UNIFI_URL:-}
+      - UNIFI_USER=${UNIFI_USER:-}
+      - UNIFI_PASS=${UNIFI_PASS:-}
+      - UNIFI_SITE=${UNIFI_SITE:-default}
+      - UNIFI_VERIFY_SSL=${UNIFI_VERIFY_SSL:-false}
+      # Pi-hole
+      - PIHOLE_URL=${PIHOLE_URL:-}
+      - PIHOLE_TOKEN=${PIHOLE_TOKEN:-}
+      # AdGuard
+      - ADGUARD_URL=${ADGUARD_URL:-}
+      - ADGUARD_USER=${ADGUARD_USER:-}
+      - ADGUARD_PASS=${ADGUARD_PASS:-}
+    ports:
+      - "${NETWORK_PORT:-8002}:8002"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/api/health')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    networks:
+      - aegis-network
+
+  # ──────────────────────────────────────────────
+  # Dashboard (Next.js)
+  # ──────────────────────────────────────────────
+  dashboard:
+    build: ../apps/maintenance-ui
+    container_name: aegis-dashboard
+    restart: unless-stopped
+    environment:
+      # Set HOMELAB_IP to your server's LAN IP so the browser can reach the API
+      - NEXT_PUBLIC_API_URL=http://${HOMELAB_IP:-localhost}:${CORE_PORT:-8000}
+    ports:
+      - "${DASHBOARD_PORT:-3000}:3000"
+    depends_on:
+      aegis-core:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    networks:
+      - aegis-network
+
+  # ──────────────────────────────────────────────
+  # PostgreSQL
+  # ──────────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    container_name: aegis-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-aegis}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-aegis_secure_password}
+      - POSTGRES_DB=${POSTGRES_DB:-aegis}
+    volumes:
+      - aegis-db-data:/var/lib/postgresql/data
+    # Only expose on localhost — not to the LAN
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aegis}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    networks:
+      - aegis-network
+
+  # ──────────────────────────────────────────────
+  # Meshtastic Bridge (optional — needs radio hardware)
+  # Start with: --profile mesh
+  # ──────────────────────────────────────────────
+  mesh-bridge:
+    build: ../apps/mesh-bridge
+    container_name: aegis-mesh-bridge
+    restart: unless-stopped
+    environment:
+      - MESH_DEVICE_PATH=${MESH_DEVICE_PATH:-/dev/ttyUSB0}
+    devices:
+      - "${MESH_DEVICE_PATH:-/dev/ttyUSB0}:${MESH_DEVICE_PATH:-/dev/ttyUSB0}"
+    ports:
+      - "${MESH_PORT:-8001}:8001"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/api/status')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    networks:
+      - aegis-network
+    profiles:
+      - mesh
+
+  # ──────────────────────────────────────────────
+  # Ollama Local LLM (optional)
+  # Start with: --profile llm
+  # ──────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: aegis-ollama
+    restart: unless-stopped
+    volumes:
+      - aegis-ollama-data:/root/.ollama
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    # Uncomment for NVIDIA GPU passthrough (requires nvidia-container-toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    networks:
+      - aegis-network
+    profiles:
+      - llm
+
+networks:
+  aegis-network:
+    driver: bridge
+
+volumes:
+  aegis-db-data:
+  aegis-plugins:
+  aegis-ollama-data:
